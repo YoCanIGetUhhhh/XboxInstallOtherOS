@@ -90,3 +90,6 @@ Progress posts: [Xbox VM running Linux](https://www.reddit.com/r/XboxRetailHomeb
 This project is released under the **GNU General Public License v2** (see `LICENSE`), the same license as QEMU.
 - [QEMU](https://www.qemu.org/) (GPL-2.0) and [libslirp](https://gitlab.freedesktop.org/slirp/libslirp) (BSD) provide the emulation and the user-mode network.
 - Tux the penguin is the Linux mascot.
+
+---
+Much love Mutahar <3 you a g
