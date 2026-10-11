@@ -1,0 +1,220 @@
+<Page
+    x:Class="XboxVmHost.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    XYFocusKeyboardNavigation="Enabled"
+    Background="#CAC7C4">
+
+    <Page.Resources>
+        <Style x:Key="MenuButton" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Padding" Value="14,1"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#D9303030"/>
+            <Setter Property="UseSystemFocusVisuals" Value="True"/>
+        </Style>
+        <Style x:Key="MainButton" TargetType="Button" BasedOn="{StaticResource MenuButton}">
+            <Setter Property="Background" Value="#E02E7D5B"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="CreateButton" TargetType="Button" BasedOn="{StaticResource MenuButton}">
+            <Setter Property="Background" Value="#107C10"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0"/>
+        </Style>
+    </Page.Resources>
+
+    <Grid>
+        <!-- Main menu. Everything sits in the left half so the penguin stays visible. -->
+        <Grid x:Name="MainGrid" Margin="48,14,48,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="440"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,6">
+                <TextBlock Text="Install Other OS" FontSize="30" FontWeight="SemiBold" Foreground="#272727"/>
+                <TextBlock Text="Hold Ctrl + Alt + Shift, then press Q to stop, or S for a screenshot, V to save state"
+                           FontSize="13" FontWeight="SemiBold" Foreground="#7A3E00" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <Border Grid.Row="1" Grid.Column="0" Background="#B3000000" CornerRadius="6" Padding="14,6" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="Virtual RAM" FontSize="14" Foreground="#99FFFFFF"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="StatusRam" FontSize="14" Foreground="White"/>
+                    <TextBlock Grid.Row="1" Text="Virtual disk" FontSize="14" Foreground="#99FFFFFF"/>
+                    <ScrollViewer Grid.Row="1" Grid.Column="1" x:Name="StatusDiskScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled" IsTabStop="False" IsHitTestVisible="False">
+                        <TextBlock x:Name="StatusDisk" FontSize="14" Foreground="White" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="2" Text="ISO file" FontSize="14" Foreground="#99FFFFFF"/>
+                    <ScrollViewer Grid.Row="2" Grid.Column="1" x:Name="StatusIsoScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled" IsTabStop="False" IsHitTestVisible="False">
+                        <TextBlock x:Name="StatusIso" FontSize="14" Foreground="White" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="3" Text="Network" FontSize="14" Foreground="#99FFFFFF"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="StatusNet" FontSize="14" Foreground="White"/>
+                    <TextBlock Grid.Row="4" Text="Speed" FontSize="14" Foreground="#99FFFFFF"/>
+                    <ScrollViewer Grid.Row="4" Grid.Column="1" x:Name="StatusSpeedScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled" IsTabStop="False" IsHitTestVisible="False">
+                        <TextBlock x:Name="StatusSpeed" FontSize="14" Foreground="White" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <StackPanel Grid.Row="2" Grid.Column="0">
+                <Button x:Name="BootDiskButton" Content="Start Linux from disk" Style="{StaticResource MainButton}"
+                        Click="BootDiskButton_Click"/>
+                <Button x:Name="ResumeButton" Content="Resume saved state" Style="{StaticResource MainButton}"
+                        Click="ResumeButton_Click"/>
+                <Button x:Name="BootIsoButton" Content="Boot from ISO (install or try Linux)" Style="{StaticResource MenuButton}"
+                        Click="BootIsoButton_Click"/>
+                <Button x:Name="ListFilesButton" Content="Show storage folder" Style="{StaticResource MenuButton}"
+                        Click="ListFilesButton_Click"/>
+            </StackPanel>
+
+
+            <!-- Penguin under the buttons. Its pupils are separate shapes that follow the pointer. -->
+            <Viewbox Grid.Row="3" Grid.Column="0" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left" VerticalAlignment="Center"
+                     Margin="10,8,0,8" IsHitTestVisible="True">
+                <Grid x:Name="PenguinGrid" Width="542" Height="634">
+                    <Image Source="Assets/PenguinEyes.png" Width="542" Height="634" Stretch="Fill"/>
+                    <Canvas Width="542" Height="634">
+                        <Ellipse x:Name="PupilL" Width="22" Height="30" Fill="#3A3A3E" Canvas.Left="209" Canvas.Top="110" RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform><CompositeTransform x:Name="PupilLT"/></Ellipse.RenderTransform>
+                        </Ellipse>
+                        <Ellipse x:Name="PupilR" Width="22" Height="30" Fill="#3A3A3E" Canvas.Left="284" Canvas.Top="108" RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform><CompositeTransform x:Name="PupilRT"/></Ellipse.RenderTransform>
+                        </Ellipse>
+                        <Rectangle x:Name="EggFoot" Width="215" Height="200" Canvas.Left="10" Canvas.Top="430" Fill="Transparent" Tapped="EggFoot_Tapped" PointerEntered="EggFoot_Entered" PointerExited="EggFoot_Exited"/>
+                    </Canvas>
+                </Grid>
+            </Viewbox>
+
+            <!-- Messages box, top right above the penguin. It also shows what happened if the app crashed last time.
+                 Can take controller focus so long output can be scrolled. -->
+            <!-- Right side: messages on top, penguin underneath in its own row so they can never overlap. -->
+            <Grid Grid.Row="0" Grid.RowSpan="4" Grid.Column="1" Margin="14,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="150"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Background="#CC000000" CornerRadius="6" Padding="10,6">
+                        <ScrollViewer x:Name="LogScroller" VerticalScrollBarVisibility="Auto"
+                                      IsTabStop="True" UseSystemFocusVisuals="True">
+                            <TextBlock x:Name="LogText" FontFamily="Consolas" FontSize="11"
+                                       Foreground="#D6E4F0" TextWrapping="Wrap"/>
+                        </ScrollViewer>
+                    </Border>
+                    <Grid Grid.Row="1" Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" x:Name="ClearLogButton" Content="Clear log" Style="{StaticResource MenuButton}"
+                                Margin="0" Click="ClearLogButton_Click"/>
+                        <Button Grid.Column="2" x:Name="SpeedSettingsButton" Content="Settings" Style="{StaticResource MainButton}"
+                                Margin="0" Click="SpeedSettingsButton_Click"/>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- Settings page. Opened with the "Settings" button; "Back" returns to the main menu. -->
+        <Grid x:Name="SettingsGrid" Visibility="Collapsed" Margin="48,14,48,14" HorizontalAlignment="Stretch">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="28"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Settings" FontSize="30" FontWeight="SemiBold" Foreground="#272727"/>
+                <TextBlock x:Name="SpeedNote" FontSize="13" FontWeight="SemiBold" Foreground="#7A3E00" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                <Button x:Name="CpuModelButton" Content="CPU type" Style="{StaticResource MainButton}" Click="CpuModelButton_Click"/>
+                <TextBlock Text="qemu64 is the fastest and the recommended choice. Nehalem is an older, more cautious option."
+                           FontSize="12" Foreground="#272727" TextWrapping="Wrap" Margin="4,0,0,6"/>
+
+                <Button x:Name="TbButton" Content="Code cache" Style="{StaticResource MainButton}" Click="TbButton_Click"/>
+                <TextBlock Text="Memory for translated code. 128 MB is the recommended size. Virtual RAM plus this must fit inside the Xbox app limit."
+                           FontSize="12" Foreground="#272727" TextWrapping="Wrap" Margin="4,0,0,6"/>
+
+                <Button x:Name="CpusButton" Content="Number of CPUs" Style="{StaticResource MainButton}" Click="CpusButton_Click"/>
+                <TextBlock Text="2 CPUs run much faster than 1 and are recommended. More than 2 can crash the app on the Xbox."
+                           FontSize="12" Foreground="#272727" TextWrapping="Wrap" Margin="4,0,0,6"/>
+
+                <Button x:Name="DiskModeButton" Content="Disk type" Style="{StaticResource MainButton}" Click="DiskModeButton_Click"/>
+                <TextBlock Text="IDE is the old safe type. Virtio is faster. Fast install also skips safe-writing, only for installing: a crash can corrupt the disk."
+                           FontSize="12" Foreground="#272727" TextWrapping="Wrap" Margin="4,0,0,6"/>
+
+                <Button x:Name="ScreenSizeButton" Content="Screen size" Style="{StaticResource MainButton}" Click="ScreenSizeButton_Click"/>
+                <TextBlock Text="A smaller screen means less drawing work for the CPU. Auto lets Linux choose."
+                           FontSize="12" Foreground="#272727" TextWrapping="Wrap" Margin="4,0,0,6"/>
+
+            </StackPanel>
+            <StackPanel Grid.Column="2" Margin="0,48,0,0">
+                <Button x:Name="RamButton" Content="Virtual RAM" Style="{StaticResource MainButton}"
+                        Click="RamButton_Click"/>
+                <Button x:Name="NetToggleButton" Content="Network" Style="{StaticResource MainButton}"
+                        Click="NetToggleButton_Click"/>
+                <Button x:Name="DiskSizeButton" Content="Disk size" Style="{StaticResource MainButton}" Click="DiskSizeButton_Click"/>
+                <Button x:Name="CreateDiskButton" Content="Create virtual disk" Style="{StaticResource CreateButton}"
+                        HorizontalContentAlignment="Left" Margin="0,0,0,2" Click="CreateDiskButton_Click"/>
+                <Button x:Name="PickIsoButton" Content="Pick ISO file" Style="{StaticResource MainButton}"
+                        Click="PickIsoButton_Click"/>
+                <TextBlock x:Name="SettingsMsg" FontSize="13" Foreground="#272727" TextWrapping="Wrap" Margin="4,2,0,8" MinHeight="40"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" x:Name="SpeedResetButton" Content="Reset to defaults" Style="{StaticResource MenuButton}"
+                            Margin="0" Click="SpeedResetButton_Click"/>
+                    <Button Grid.Column="2" x:Name="SpeedBackButton" Content="Back" Style="{StaticResource CreateButton}"
+                            Click="SpeedBackButton_Click"/>
+                </Grid>
+            </StackPanel>
+        </Grid>
+
+        <!-- The virtual PC's screen. Shown full-screen while a virtual PC is running. -->
+        <Grid x:Name="VmGrid" Visibility="Collapsed" Background="Black">
+            <Image x:Name="VmImage" Stretch="Uniform"/>
+            <TextBlock x:Name="VmDebug" Visibility="Collapsed" Foreground="#FFEB3B" FontSize="16" FontFamily="Consolas"
+                       Margin="8,4" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
+            <TextBlock x:Name="VmStatus" Text="" Foreground="White" FontSize="22"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+        <Border x:Name="CreditBox" Background="#B3000000" CornerRadius="6" Padding="12,4" Margin="0,0,10,8"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom" IsHitTestVisible="False">
+            <TextBlock Text="VM creator - Steam: @YoCanIGetUhhhh" FontSize="14" Foreground="White"/>
+        </Border>
+        <Grid x:Name="EggGrid" Visibility="Collapsed" Background="Black" Tapped="EggGrid_Tapped">
+            <MediaPlayerElement x:Name="EggVideo" AutoPlay="True" Stretch="Uniform" AreTransportControlsEnabled="False"/>
+        </Grid>
+    </Grid>
+</Page>

@@ -1,0 +1,309 @@
+name: Build Xbox UWP package
+
+on:
+  workflow_dispatch:
+    inputs:
+      with_qemu:
+        description: "Include the QEMU DLL (takes about 20 minutes). Untick for a quick app-only build."
+        type: boolean
+        default: true
+      reuse_run:
+        description: "Only when the QEMU box is unticked: the number of an earlier run whose QEMU files should be reused (the number at the end of that run's web address)."
+        type: string
+        default: ""
+      make_release:
+        description: "Also publish the finished package as a public Release (a download page anyone can use without a GitHub account)."
+        type: boolean
+        default: false
+
+jobs:
+  qemu:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.with_qemu }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up the MSYS2 build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git make diffutils
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-pixman
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-libslirp
+
+      - name: Install the Python helper QEMU needs
+        run: python -m pip install --break-system-packages pycotap
+
+      - name: Get the QEMU source
+        run: git clone --depth 1 --branch v10.0.0 https://github.com/qemu/qemu.git qemu-src
+
+      - name: Rename QEMU's main() so start-up code only runs once
+        run: |
+          set -e
+          sed -i 's/^int main(int argc, char \*\*argv)/int qemu_real_main(int argc, char **argv)/' qemu-src/system/main.c
+          grep -n "qemu_real_main" qemu-src/system/main.c
+          # Also let our screen/keyboard code start up right before QEMU's main loop begins.
+          sed -i 's/^#include "system\/system.h"/#include "system\/system.h"\nvoid uwp_after_init(void);/' qemu-src/system/main.c
+          sed -i 's/^    status = qemu_main_loop();/    uwp_after_init();\n    status = qemu_main_loop();/' qemu-src/system/main.c
+          grep -n "uwp_after_init" qemu-src/system/main.c
+          test "$(grep -c uwp_after_init qemu-src/system/main.c)" = "2"
+
+      - name: Let QEMU's code generator use the memory calls an Xbox app is allowed to use
+        run: |
+          set -e
+          python - <<'PYEOF'
+          p = "qemu-src/tcg/region.c"
+          s = open(p).read()
+          old = "buf = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT,\n                             PAGE_EXECUTE_READWRITE);"
+          if old not in s:
+              raise SystemExit("could not find the VirtualAlloc call in tcg/region.c")
+          s = s.replace(old, "buf = uwp_jit_alloc(size);")
+          s = s.replace("static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)\n{\n    void *buf;\n\n    if (splitwx > 0) {\n        error_setg(errp, \"jit split-wx not supported\");", "extern void *uwp_jit_alloc(size_t size);\nstatic int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)\n{\n    void *buf;\n\n    if (splitwx > 0) {\n        error_setg(errp, \"jit split-wx not supported\");", 1)
+          open(p, "w").write(s)
+          # Disk files: UWP apps may not ask Windows for the sector size, so GetDiskFreeSpace
+          # fails and leaves garbage. Start from 512 so a failed call still gives a valid value.
+          p2 = "qemu-src/block/file-win32.c"
+          t = open(p2).read()
+          old2 = "        GetDiskFreeSpace(s->drive_path, &sectorsPerCluster,"
+          if t.count(old2) != 1:
+              raise SystemExit("could not find GetDiskFreeSpace in block/file-win32.c")
+          t = t.replace(old2, "        dg.Geometry.BytesPerSector = 512;\n" + old2)
+          # If the call "succeeds" but hands back 0 or an odd number, use 512 as well.
+          old3 = "&freeClusters, &totalClusters);\n        bs->bl.request_alignment = dg.Geometry.BytesPerSector;\n"
+          if t.count(old3) != 1:
+              raise SystemExit("could not find the alignment assignment in block/file-win32.c")
+          t = t.replace(old3, old3 + "        if (bs->bl.request_alignment == 0 || (bs->bl.request_alignment & (bs->bl.request_alignment - 1))) {\n            bs->bl.request_alignment = 512;\n        }\n")
+          open(p2, "w").write(t)
+          PYEOF
+          grep -n "uwp_jit_alloc" qemu-src/tcg/region.c
+          grep -n "BytesPerSector = 512" qemu-src/block/file-win32.c
+
+      - name: Configure QEMU
+        run: |
+          set -o pipefail
+          mkdir -p qemu-src/build
+          cd qemu-src/build
+          ../configure --static --target-list=x86_64-softmmu --without-default-features --enable-tcg --enable-slirp --disable-werror 2>&1 | tee configure.log
+
+      - name: Build QEMU
+        run: |
+          set -o pipefail
+          cd qemu-src/build
+          # The last step (linking the .exe) is expected to fail on a missing iconv library.
+          # Everything is compiled by then, and the next step does the final link itself.
+          make -j4 qemu-system-x86_64.exe 2>&1 | tee build.log || echo "NOTE: make reported a problem (expected if only the final link failed)"
+
+      - name: Find the UWP-allowed function list (WindowsApp.lib)
+        shell: pwsh
+        run: |
+          $lib = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" -Recurse -Filter WindowsApp.lib | Where-Object { $_.FullName -match "\\um\\x64\\" } | Select-Object -First 1 -ExpandProperty FullName
+          Write-Host "Found: $lib"
+          "WINDOWSAPP_LIB=$lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Turn QEMU into a DLL
+        run: |
+          set -e
+          cd qemu-src/build
+          gcc -O2 -c -o uwp_entry.o ../../native/uwp_entry.c
+          gcc -O2 -c -o uwp_shim.o ../../native/uwp_shim.c
+          gcc -O2 -c -o uwp_jit.o ../../native/uwp_jit.c
+          python ../../native/compile_like_qemu.py ../../native/uwp_display.c uwp_display.o
+          rm -f qemu-system-x86_64.exe
+          ninja -d keeprsp qemu-system-x86_64.exe || echo "NOTE: exe link failed again (expected); continuing with the DLL link"
+          ls -l qemu-system-x86_64.exe.rsp
+          echo "Start of the response file:"; head -c 1500 qemu-system-x86_64.exe.rsp; echo
+          python - <<'PYEOF'
+          import re, os
+          s = open("qemu-system-x86_64.exe.rsp").read()
+          s2, n = re.subn(r'(?:"-o"|-o)\s+"?qemu-system-x86_64\.exe"?', '-shared -o qemu.dll uwp_entry.o uwp_shim.o uwp_jit.o uwp_display.o', s)
+          print("replacements:", n)
+          if n != 1:
+              raise SystemExit("could not find the -o option in the response file")
+          # libintl (linked in statically) needs iconv, and the configure step did not add it.
+          import subprocess
+          wa = subprocess.check_output(["cygpath", "-m", os.environ["WINDOWSAPP_LIB"]]).decode().strip()
+          # WindowsApp.lib goes last, so it only supplies what nothing else does (VirtualAllocFromApp and friends).
+          s2 = s2.rstrip() + "\n-Wl,--wrap=exit\n-Wl,-Bstatic\n-liconv\n-Wl,-Bdynamic\n\"" + wa + "\"\n"
+          open("qemu-dll.rsp", "w").write(s2)
+          PYEOF
+          cc -m64 @qemu-dll.rsp
+          ls -l qemu.dll
+
+      - name: Check the DLL against the UWP-allowed list
+        id: audit
+        continue-on-error: true
+        run: |
+          python -m pip install --break-system-packages pefile
+          cp "$(cygpath -u "$WINDOWSAPP_LIB")" windowsapp.lib
+          nm -g windowsapp.lib > windowsapp_symbols.txt 2>/dev/null || true
+          for f in CreateFiberEx ConvertThreadToFiberEx WaitForMultipleObjectsEx SetLastError; do
+            if grep -qw "$f" windowsapp_symbols.txt; then echo "allowed: $f"; else echo "MISSING from allowed list: $f"; fi
+          done
+          python native/uwp_audit.py qemu-src/build/qemu.dll windowsapp_symbols.txt "$MSYSTEM_PREFIX/bin" 2>&1 | tee uwp-audit.txt
+
+      - name: Put the check report on the Summary page
+        if: always()
+        run: |
+          S=$(cygpath -u "$GITHUB_STEP_SUMMARY")
+          {
+            echo '## QEMU DLL: UWP check'
+            echo '```'
+            if [ -f uwp-audit.txt ]; then head -c 60000 uwp-audit.txt; else echo "No report (an earlier step failed)."; fi
+            echo '```'
+          } >> "$S"
+
+      - name: Collect the DLL (only if it passed the check)
+        if: always()
+        run: |
+          mkdir -p qemudll
+          cp uwp-audit.txt qemudll/ 2>/dev/null || true
+          if [ "${{ steps.audit.outcome }}" = "success" ]; then
+            cp qemu-src/build/qemu.dll qemudll/
+            mkdir -p qemudll/pc-bios
+            for f in bios-256k.bin bios.bin kvmvapic.bin linuxboot_dma.bin multiboot_dma.bin pvh.bin vgabios.bin vgabios-stdvga.bin vgabios-cirrus.bin; do
+              cp qemu-src/pc-bios/$f qemudll/pc-bios/ || echo "missing firmware file: $f"
+            done
+            ls -l qemudll/pc-bios
+            for d in $(ldd qemu-src/build/qemu.dll | grep -i ucrt64 | awk '{print $3}'); do cp "$d" qemudll/; done
+            echo "DLL passed the check and was collected."
+          else
+            echo "DLL did NOT pass the check (or was not built), so it is left out of the app."
+          fi
+          ls -l qemudll
+
+      - name: Show the last lines of any failure
+        if: failure()
+        run: |
+          S=$(cygpath -u "$GITHUB_STEP_SUMMARY")
+          {
+            echo '## QEMU DLL build problem (last lines)'
+            echo '```'
+            tail -n 40 qemu-src/build/configure.log 2>/dev/null
+            tail -n 60 qemu-src/build/build.log 2>/dev/null
+            echo '```'
+          } >> "$S"
+
+      - name: Save the DLL files
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemudll
+          path: qemudll/
+          if-no-files-found: warn
+
+  build:
+    needs: qemu
+    permissions:
+      contents: write
+      actions: read
+    if: ${{ !cancelled() }}
+    runs-on: windows-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Get the QEMU DLL files built by the other job
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: qemudll
+          path: qemudll
+
+      - name: Or reuse the QEMU DLL files from an earlier run
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.with_qemu && inputs.reuse_run != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: qemudll
+          path: qemudll
+          run-id: ${{ inputs.reuse_run }}
+          github-token: ${{ github.token }}
+
+      - name: Put the QEMU DLL files next to the app
+        shell: pwsh
+        run: |
+          if (Test-Path qemudll) { Get-ChildItem qemudll -Filter *.dll | Move-Item -Destination . -Force }
+          if (Test-Path qemudll\pc-bios) { New-Item -ItemType Directory -Force pc-bios | Out-Null; Get-ChildItem qemudll\pc-bios | Move-Item -Destination pc-bios -Force }
+          if (Test-Path pc-bios) { Get-ChildItem pc-bios | Format-Table Name, Length }
+          Get-ChildItem *.dll | Format-Table Name, Length
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Find the installed Windows SDK
+        shell: powershell
+        run: |
+          $uap = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Platforms\UAP"
+          Write-Host "Looking in: $uap"
+          $names = @()
+          if (Test-Path $uap) { $names = @(Get-ChildItem $uap | Select-Object -ExpandProperty Name | Sort-Object { [version]$_ } -Descending) }
+          Write-Host "UAP platform versions found: $($names -join ', ')"
+          $ver = "10.0.26100.0"
+          if ($names.Count -gt 0) { $ver = [string]$names[0] }
+          Write-Host "Using SDK version: $ver"
+          "SDKVER=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Create a test signing certificate
+        shell: powershell
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=Thomas" -KeyUsage DigitalSignature -FriendlyName "XboxVmHost Test" -CertStoreLocation "Cert:\CurrentUser\My" -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          $pw = ConvertTo-SecureString -String "xboxdev" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath "$env:RUNNER_TEMP\test.pfx" -Password $pw | Out-Null
+          Export-Certificate -Cert $cert -FilePath "$env:GITHUB_WORKSPACE\XboxVmHostTest.cer" | Out-Null
+
+      - name: Restore packages
+        run: msbuild XboxVmHost.csproj /t:Restore /p:Configuration=Release /p:Platform=x64 /p:TargetPlatformVersion=$env:SDKVER
+
+      - name: Build the app package
+        run: >
+          msbuild XboxVmHost.csproj
+          /p:Configuration=Release
+          /p:Platform=x64
+          /p:TargetPlatformVersion=$env:SDKVER
+          /p:AppxBundle=Never
+          /p:GenerateAppxPackageOnBuild=true
+          /p:AppxPackageSigningEnabled=true
+          /p:PackageCertificateKeyFile="$env:RUNNER_TEMP\test.pfx"
+          /p:PackageCertificatePassword=xboxdev
+          /p:AppxPackageDir="$env:GITHUB_WORKSPACE\out\"
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: XboxVmHost-package
+          path: |
+            out/**
+            XboxVmHostTest.cer
+
+      - name: Publish a Release (only when asked)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.make_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = ([xml](Get-Content Package.appxmanifest)).Package.Identity.Version
+          $all = @(Get-ChildItem out -Recurse -File | Where-Object { $_.Extension -eq '.msix' -or ($_.Extension -eq '.appx' -and $_.FullName -match '[\\/]x64[\\/]') })
+          $files = @($all | Sort-Object Name -Unique | ForEach-Object { $_.FullName })
+          $files += (Join-Path $env:GITHUB_WORKSPACE 'XboxVmHostTest.cer')
+          Write-Host "Release files:"; $files | ForEach-Object { Write-Host $_ }
+          $notes = "Install Other OS $ver. Download the .msix file and the three .appx dependency files (x64) from the list below, then install them with the Xbox Device Portal (Apps manager). See the README for the steps."
+          $tag = "v$ver-run$($env:GITHUB_RUN_NUMBER)"
+          $out = & gh release create $tag @files --repo $env:GITHUB_REPOSITORY --title "Install Other OS $ver" --notes $notes 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) {
+            $msg = ($out -replace "\r?\n", " | ")
+            Write-Host "::error title=Release failed::$msg"
+            exit 1
+          }
