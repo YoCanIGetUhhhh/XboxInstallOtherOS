@@ -1556,7 +1556,7 @@ namespace XboxVmHost
                 foreach (var f in files)
                 {
                     var p = await f.GetBasicPropertiesAsync();
-                    Log(" - " + f.Name + "  (" + (p.Size / (1024 * 1024)) + " MB)");
+                    Log(" - " + f.Name + "  (" + (p.Size >= 1024 * 1024 ? (p.Size / (1024 * 1024)) + " MB" : ((p.Size + 1023) / 1024) + " KB") + ")");
                 }
             }
             catch (Exception ex)
