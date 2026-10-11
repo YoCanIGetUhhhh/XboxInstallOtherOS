@@ -296,7 +296,6 @@ jobs:
           $ver = ([xml](Get-Content Package.appxmanifest)).Package.Identity.Version
           $all = @(Get-ChildItem out -Recurse -File | Where-Object { $_.Extension -eq '.msix' -or ($_.Extension -eq '.appx' -and $_.FullName -match '[\\/]x64[\\/]') })
           $files = @($all | Sort-Object Name -Unique | ForEach-Object { $_.FullName })
-          $files += (Join-Path $env:GITHUB_WORKSPACE 'XboxVmHostTest.cer')
           Write-Host "Release files:"; $files | ForEach-Object { Write-Host $_ }
           $notes = "Install Other OS $ver. Download the .msix file and the three .appx dependency files (x64) from the list below, then install them with the Xbox Device Portal (Apps manager). See the README for the steps."
           $tag = "v$ver-run$($env:GITHUB_RUN_NUMBER)"
