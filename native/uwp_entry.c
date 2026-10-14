@@ -50,19 +50,6 @@ __declspec(dllexport) int qemu_dll_main(const char *outfile, int argc, char **ar
        Without this, Windows turns every 0x0A byte into 0x0D 0x0A and stops reading at 0x1A,
        which corrupts saved states. */
     _set_fmode(_O_BINARY);
-    /* Graphics test: when the Virgl graphics card is in use, ask virglrenderer to explain what it does
-       and why it rejects something. (Only then, so normal use stays quiet.) */
-    {
-        int i;
-        for (i = 0; i < argc; i++) {
-            if (argv[i] && strstr(argv[i], "virtio-vga-gl")) {
-                /* the renderer's own option names: obj = print each object it creates, feat = log the GPU features it found */
-                _putenv("VREND_DEBUG=obj,feat");
-                _putenv("VIRGL_DEBUG=obj,feat");
-                break;
-            }
-        }
-    }
     g_main_thread = GetCurrentThreadId();
     if (__builtin_setjmp(g_jmp) == 0) {
         int r = qemu_real_main(argc, argv);

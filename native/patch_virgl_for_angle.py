@@ -47,50 +47,20 @@ for path in ("virgl-src/src/virglrenderer.c", "virgl-src/src/vrend/vrend_winsys.
         if "get_egl_display" in l or "virgl_egl_init" in l or "vrend_winsys_init" in l:
             report.append("%s:%d: %s" % (path, i + 1, l.strip()))
 
-# ---- always-on messages (the renderer's debug switch did not work for us, so print directly) ----
+# ---- (debug) always-on object messages: OFF for normal builds. Set UWP_VIRGL_DEBUG=1 when building to turn them on. ----
 import re as _re
 
-prints = 0
-for path in glob.glob("virgl-src/src/vrend/*.c"):
-    text = open(path, encoding="utf-8", errors="replace").read()
-    new_text, n = _re.subn(r"VREND_DEBUG\(\s*dbg_(object|features)\s*,\s*[A-Za-z_0-9>\-\.\(\)]+\s*,\s*", "virgl_error(", text)
-    if n:
-        open(path, "w", encoding="utf-8", newline="\n").write(new_text)
-        report.append("always-on messages: %s: %d" % (path, n))
-        prints += n
-report.append("always-on messages total: %d" % prints)
-if prints == 0:
-    sys.exit("PATCH FAILED: found no VREND_DEBUG(dbg_object/dbg_features) lines to turn on")
-
-# ---- information gathering for the next step (nothing here changes any file) ----
-def dump_function(path, signature_start, max_lines=90):
-    if not os.path.exists(path):
-        report.append("(missing file %s)" % path)
-        return
-    lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
-    for i, l in enumerate(lines):
-        if l.startswith(signature_start):
-            end = i
-            while end < len(lines) and not lines[end].startswith("}") and end - i < max_lines:
-                end += 1
-            report.append("=== %s:%d %s" % (path, i + 1, signature_start))
-            report.extend(lines[i:end + 1])
-            return
-    report.append("(function %s not found in %s)" % (signature_start, path))
-
-
-def dump_matches(root, needles, around=4, max_hits=12):
-    hits = 0
-    for path in glob.glob(root + "/**/*.c", recursive=True) + glob.glob(root + "/**/*.h", recursive=True):
-        lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
-        for i, l in enumerate(lines):
-            if any(n in l for n in needles):
-                report.append("=== %s:%d" % (path, i + 1))
-                report.extend(lines[max(0, i - around): i + around + 1])
-                hits += 1
-                if hits >= max_hits:
-                    return
-
+if os.environ.get("UWP_VIRGL_DEBUG") == "1":
+    prints = 0
+    for path in glob.glob("virgl-src/src/vrend/*.c"):
+        text = open(path, encoding="utf-8", errors="replace").read()
+        new_text, n = _re.subn(r"VREND_DEBUG\(\s*dbg_(object|features)\s*,\s*[A-Za-z_0-9>\-\.\(\)]+\s*,\s*", "virgl_error(", text)
+        if n:
+            open(path, "w", encoding="utf-8", newline="\n").write(new_text)
+            prints += n
+    report.append("debug messages turned on: %d" % prints)
+else:
+    report.append("debug messages: off")
 
 # ---- ANGLE / OpenGL ES 3.0 fixes for sampler states (the GPU said "invalid enum" on them) ----
 rp = "virgl-src/src/vrend/vrend_renderer.c"
@@ -125,27 +95,6 @@ open(rp, "w", encoding="utf-8", newline="\n").write(rt)
 report.append("sampler patch: wrap %d, border %d, filter %d" % (n1, n2, n3))
 if n1 != 3 or n2 != 1 or n3 != 2:
     sys.exit("PATCH FAILED: sampler patch matched %d/%d/%d (expected 3/1/2)" % (n1, n2, n3))
-
-# Sampler code: the GPU refused "CREATE SAMPLER_STATE" with GL error 1280 (invalid enum).
-dump_lines = []
-
-
-def dump_named(names, max_lines=70):
-    for path in sorted(glob.glob("virgl-src/src/vrend/*.c")):
-        lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
-        for i, l in enumerate(lines):
-            for n in names:
-                if (n + "(") in l and not l.startswith((" ", "\t", "#")) and not l.rstrip().endswith(";"):
-                    end = i
-                    while end < len(lines) and not lines[end].startswith("}") and end - i < max_lines:
-                        end += 1
-                    dump_lines.append("=== %s:%d" % (path, i + 1))
-                    dump_lines.extend(x.rstrip() for x in lines[i:end + 1] if x.strip())
-                    break
-
-
-dump_named(["vrend_create_sampler_state", "vrend_decode_create_sampler_state", "vrend_create_sampler_view"])
-open("virgl-dump.txt", "w").write("\n".join(dump_lines) + "\n")
 
 report.insert(0, "virglrenderer patch: %d check(s) removed" % changed)
 open("virgl-patch.txt", "w").write("\n".join(report) + "\n")

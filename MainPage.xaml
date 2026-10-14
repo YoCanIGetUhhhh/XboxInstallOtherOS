@@ -89,8 +89,6 @@
                         Click="BootIsoButton_Click"/>
                 <Button x:Name="ListFilesButton" Content="Show storage folder" Style="{StaticResource MenuButton}"
                         Click="ListFilesButton_Click"/>
-                <Button x:Name="GraphicsTestButton" Content="Test graphics (ANGLE)" Style="{StaticResource MenuButton}"
-                        Click="GraphicsTestButton_Click"/>
             </StackPanel>
 
 

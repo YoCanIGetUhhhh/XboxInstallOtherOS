@@ -48,16 +48,16 @@ namespace XboxVmHost
                     var sb = new StringBuilder();
                     sb.Append("!!! THE APP CLOSED UNEXPECTEDLY DURING THE LAST RUN !!!\n");
                     sb.Append("It was starting: ").Append(File.ReadAllText(FlagPath)).Append("\n");
-                    try { if (File.Exists(LogPath)) sb.Append("--- app steps ---\n").Append(File.ReadAllText(LogPath)); } catch { }
+                    try { if (File.Exists(LogPath)) sb.Append("--- app steps ---\n").Append(ReadLogTail(LogPath)); } catch { }
                     try { if (File.Exists(QemuOutPath)) sb.Append("--- QEMU messages (last thing it said before the crash) ---\n").Append(ReadSharedText(QemuOutPath)); } catch { }
                     File.WriteAllText(CrashPath, sb.ToString());
                     File.Delete(FlagPath);
                 }
-                if (File.Exists(CrashPath)) shown = File.ReadAllText(CrashPath);
+                if (File.Exists(CrashPath)) shown = ReadLogTail(CrashPath);
                 else
                 {
                     string old = null;
-                    try { if (File.Exists(LogPath)) old = File.ReadAllText(LogPath); } catch { }
+                    try { if (File.Exists(LogPath)) old = ReadLogTail(LogPath); } catch { }
                     try { if (File.Exists(QemuOutPath)) old = (old ?? "") + "--- QEMU messages ---\n" + ReadSharedText(QemuOutPath) + "\n"; } catch { }
                     if (!string.IsNullOrEmpty(old)) shown = "=== LOG FROM LAST RUN ===\n" + old;
                 }
@@ -268,11 +268,34 @@ namespace XboxVmHost
 
         // QEMU's text output file stays open inside the C runtime after QEMU finishes,
         // so it has to be opened in a mode that allows another writer to still have it open.
+        // Only the END of a log is read (the GPU mode can write many megabytes, and a huge text in the log box
+        // made the app crash when Linux stopped and again every time the app was opened).
+        private const int MaxLogChars = 60000;
+
         private static string ReadSharedText(string path)
         {
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                return ReadTail(fs);
+        }
+
+        private static string ReadLogTail(string path)
+        {
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                return ReadTail(fs);
+        }
+
+        private static string ReadTail(FileStream fs)
+        {
+            bool cut = fs.Length > MaxLogChars;
+            if (cut) fs.Seek(-MaxLogChars, SeekOrigin.End);
             using (var sr = new StreamReader(fs))
-                return sr.ReadToEnd();
+            {
+                string s = sr.ReadToEnd();
+                if (!cut) return s;
+                int nl = s.IndexOf('\n');
+                if (nl >= 0 && nl < 2000) s = s.Substring(nl + 1);
+                return "(... earlier lines left out, the file is " + (fs.Length / 1024) + " KB ...)\n" + s;
+            }
         }
 
         private bool _qemuUsed;
@@ -466,7 +489,7 @@ namespace XboxVmHost
         }
 
         // Screen size the virtual graphics card asks Linux to use. "Auto" lets Linux choose.
-        private static readonly string[] ScreenChoices = { "Auto", "1280x720", "1024x768", "800x600", "GPU test" };
+        private static readonly string[] ScreenChoices = { "Auto", "1280x720", "1024x768", "800x600", "GPU" };
         private static string ScreenCfgPath { get { return Path.Combine(ApplicationData.Current.LocalFolder.Path, "screen.cfg"); } }
         private static string VmScreen
         {
@@ -477,6 +500,7 @@ namespace XboxVmHost
                     if (File.Exists(ScreenCfgPath))
                     {
                         string v = File.ReadAllText(ScreenCfgPath).Trim();
+                        if (v == "GPU test") v = "GPU"; // name used by the test builds
                         if (Array.IndexOf(ScreenChoices, v) >= 0) return v;
                     }
                 }
@@ -831,10 +855,10 @@ namespace XboxVmHost
                 "-nodefaults",
                 "-monitor", "none", "-serial", "none"
             });
-            // "GPU test": experimental Virgl graphics card drawn by ANGLE (Direct3D 11). Everything else keeps the plain card.
-            if (VmScreen == "GPU test") list.AddRange(new string[] { "-display", "egl-headless,gl=es", "-device", "virtio-vga-gl" });
+            // "GPU": virtual graphics card (Virgl) drawn by the Xbox GPU through ANGLE (Direct3D 11). Everything else keeps the plain card.
+            if (VmScreen == "GPU") list.AddRange(new string[] { "-display", "egl-headless,gl=es", "-device", "virtio-vga-gl" });
             else list.AddRange(new string[] { "-display", "none" });
-            if (VmScreen == "GPU test") { }
+            if (VmScreen == "GPU") { }
             else if (VmScreen == "Auto") list.AddRange(new string[] { "-vga", "std" });
             else
             {
@@ -1562,19 +1586,6 @@ namespace XboxVmHost
         }
 
         // ---- Button: list storage folder ----
-        // Graphics test: starts ANGLE (OpenGL ES on Direct3D 11) off-screen and writes the report into the log box.
-        private async void GraphicsTestButton_Click(object sender, RoutedEventArgs e)
-        {
-            GraphicsTestButton.IsEnabled = false;
-            ResetLog();
-            Log("=== GRAPHICS TEST (ANGLE) ===");
-            string report;
-            try { report = await System.Threading.Tasks.Task.Run(() => AngleTest.Run()); }
-            catch (Exception ex) { report = "RESULT: FAILED - " + ex.GetType().Name + ": " + ex.Message; }
-            foreach (string line in report.Split('\n')) Log(line.TrimEnd('\r'));
-            GraphicsTestButton.IsEnabled = true;
-        }
-
         private async void ListFilesButton_Click(object sender, RoutedEventArgs e)
         {
             try

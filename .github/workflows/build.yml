@@ -11,132 +11,14 @@ on:
         description: "Only when the QEMU box is unticked: the number of an earlier run whose QEMU files should be reused (the number at the end of that run's web address)."
         type: string
         default: ""
-      gpu_probe:
-        description: "Virgl check only (no app, no QEMU DLL): tries to build the graphics pieces and reports what works on the Summary page."
-        type: boolean
-        default: false
       make_release:
         description: "Also publish the finished package as a public Release (a download page anyone can use without a GitHub account)."
         type: boolean
         default: false
 
 jobs:
-  gpu_probe:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.gpu_probe }}
-    runs-on: windows-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - name: Set up the MSYS2 build tools
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            git make diffutils
-            mingw-w64-ucrt-x86_64-toolchain
-            mingw-w64-ucrt-x86_64-glib2
-            mingw-w64-ucrt-x86_64-pixman
-            mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-python-pip
-            mingw-w64-ucrt-x86_64-meson
-            mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-libslirp
-
-      - name: 1. Which graphics packages does MSYS2 offer?
-        id: pkgs
-        continue-on-error: true
-        run: |
-          S=$(cygpath -u "$GITHUB_STEP_SUMMARY")
-          { echo '## Virgl check (Stage 1)'; echo; echo '### 1. Packages MSYS2 offers (virgl, epoxy, angle)'; echo '```'; } >> "$S"
-          pacman -Ss 'virgl|epoxy|angle' 2>&1 | grep -i 'ucrt64\|ucrt-x86_64' | head -40 >> "$S" || true
-          echo '```' >> "$S"
-          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-libepoxy 2>&1 | tail -5
-
-      - name: 2. Build virglrenderer from source
-        id: virgl
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-python-yaml mingw-w64-ucrt-x86_64-libepoxy
-          git clone --depth 1 https://gitlab.freedesktop.org/virgl/virglrenderer.git virgl-src
-          cd virgl-src
-          git log -1 --format='virglrenderer commit %h %ad' --date=short
-          # Windows has no <sys/ioccom.h> (Linux/BSD DRM header). The ioctls are never used here, so a stand-in is enough to compile.
-          mkdir -p ../shim/sys
-          cat > ../shim/sys/ioccom.h <<'HDREOF'
-          #ifndef SHIM_IOCCOM_H
-          #define SHIM_IOCCOM_H
-          #define _IOC(dir,type,nr,size) (((dir)<<30)|((size)<<16)|((type)<<8)|(nr))
-          #define _IO(g,n) _IOC(0,(g),(n),0)
-          #define _IOR(g,n,t) _IOC(2,(g),(n),sizeof(t))
-          #define _IOW(g,n,t) _IOC(1,(g),(n),sizeof(t))
-          #define _IOWR(g,n,t) _IOC(3,(g),(n),sizeof(t))
-          #endif
-          HDREOF
-          export CFLAGS="-I$PWD/../shim"
-          meson setup build --prefix="$MSYSTEM_PREFIX" -Dtests=false -Dplatforms=egl 2>&1 | tee ../virgl-setup.log
-          ninja -C build 2>&1 | tee ../virgl-build.log
-          ninja -C build install 2>&1 | tail -5
-
-      - name: 3. Get QEMU 10.0.0 and try to configure it with Virgl
-        id: qemucfg
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          git clone --depth 1 --branch v10.0.0 https://github.com/qemu/qemu.git qemu-src
-          python -m pip install --break-system-packages pycotap
-          mkdir -p qemu-src/build
-          cd qemu-src/build
-          ../configure --static --target-list=x86_64-softmmu --without-default-features --enable-tcg --enable-slirp --enable-opengl --enable-virglrenderer --disable-werror 2>&1 | tee configure.log
-
-      - name: 4. Compile QEMU's Virgl graphics device
-        id: qemubuild
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          cd qemu-src/build
-          T=$(ninja -t targets all | grep -i 'virtio-gpu-virgl.c.o' | head -1 | cut -d: -f1)
-          echo "target: $T"
-          test -n "$T"
-          ninja "$T" 2>&1 | tee build.log
-
-      - name: Put the results on the Summary page
-        if: always()
-        run: |
-          set +e
-          S=$(cygpath -u "$GITHUB_STEP_SUMMARY")
-          {
-            echo
-            echo '### Results'
-            echo "- 1. packages listed: ${{ steps.pkgs.outcome }}"
-            echo "- 2. virglrenderer builds: ${{ steps.virgl.outcome }}"
-            echo "- 3. QEMU configure with Virgl: ${{ steps.qemucfg.outcome }}"
-            echo "- 4. QEMU Virgl device compiles: ${{ steps.qemubuild.outcome }}"
-          } >> "$S"
-          # Also post each result as a short note (annotation) so it can be read without opening the logs.
-          note() { m=$(printf '%s' "$2" | cut -c1-300 | tr '\r' ' ' | sed ':a;N;$!ba;s/\n/%0A/g'); echo "::notice title=$1::$m"; }
-          note "RESULT 1 packages" "${{ steps.pkgs.outcome }}"
-          note "RESULT 2 virglrenderer build" "${{ steps.virgl.outcome }}"
-          note "RESULT 3 QEMU configure with Virgl" "${{ steps.qemucfg.outcome }}"
-          note "RESULT 4 QEMU Virgl device compile" "${{ steps.qemubuild.outcome }}"
-          for f in virgl-setup.log virgl-build.log qemu-src/build/configure.log qemu-src/build/build.log; do
-            if [ -f "$f" ]; then
-              body=$(tail -n 12 "$f" | cut -c1-220 | tr '\r' ' ')
-              m=$(printf '%s' "$body" | sed ':a;N;$!ba;s/\n/%0A/g')
-              echo "::notice title=LOG TAIL $f::$m"
-              { echo "#### $f"; echo '```'; tail -n 30 "$f"; echo '```'; } >> "$S"
-            else
-              echo "::notice title=LOG TAIL $f::file does not exist (step did not get that far)"
-            fi
-          done
-          exit 0
-
   qemu:
-    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.with_qemu && !inputs.gpu_probe) }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.with_qemu }}
     runs-on: windows-latest
     timeout-minutes: 120
     defaults:
@@ -404,7 +286,6 @@ jobs:
           }
           echo "::notice title=AUDIT OUTCOME::${{ steps.audit.outcome }}"
           emit "VIRGL PATCH" virgl-patch.txt 0
-          emit "VIRGL SAMPLER CODE" virgl-dump.txt 0
           emit "COMPILE CACHE" qemu-src/build/ccache-stats.txt 0
           emit "UWP AUDIT REPORT" uwp-audit.txt 0
           emit "GRAPHICS CODE IN QEMU.DLL" gfx-symbols.txt 0
@@ -469,7 +350,7 @@ jobs:
     permissions:
       contents: write
       actions: read
-    if: ${{ !cancelled() && !inputs.gpu_probe }}
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     steps:
       - name: Get the code
@@ -499,7 +380,7 @@ jobs:
           if (Test-Path pc-bios) { Get-ChildItem pc-bios | Format-Table Name, Length }
           Get-ChildItem *.dll | Format-Table Name, Length
 
-      - name: Get ANGLE (OpenGL ES on Direct3D 11) for the graphics test
+      - name: Get ANGLE (OpenGL ES on Direct3D 11) for the GPU mode
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
