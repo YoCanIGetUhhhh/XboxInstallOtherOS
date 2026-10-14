@@ -11,7 +11,6 @@ The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. N
 - **Newest download:** the Releases page has version 1.2.19.0, which draws everything in software (no GPU).
 - **Experimental GPU drawing:** the source in this repository (version 1.2.41.0) can pass OpenGL drawing from Linux to the Xbox GPU (Virgl through ANGLE on Direct3D 11). On the Xbox it works: in Settings set **Screen size** to **GPU test**. Linux then reports an accelerated OpenGL 2.1 renderer, and the glmark2 test went from a score of 8 (software) to 246.
 - **Limits:** the emulated CPU is still slow, so only light or old 3D programs are realistic. OpenGL 2.1 is enough for old games, not for modern ones. A Release with the GPU option has not been published yet.
-- **Next:** try an old OpenGL game (EDuke32), turn off leftover debug output, and measure again.
 
 ## Screenshots
 **Main menu**
