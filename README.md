@@ -8,9 +8,9 @@ The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. N
 
 ## Current state (14 October 2026)
 - **Working:** Debian 13 with the XFCE desktop runs in the app with a working pointer, network, save state and resume.
-- **Newest download:** the Releases page has version 1.2.19.0, which draws everything in software (no GPU).
+- **Downloads:** the Releases page keeps the original working version 1.2.19.0 (software drawing only) and the newest version with the GPU option.
 - **Experimental GPU drawing:** the source in this repository (version 1.2.42.0) can pass OpenGL drawing from Linux to the Xbox GPU (Virgl through ANGLE on Direct3D 11). On the Xbox it works: in Settings set **Screen size** to **GPU**. Linux then reports an accelerated OpenGL 2.1 renderer, and the glmark2 test went from a score of 8 (software) to 246 (measured on version 1.2.41.0).
-- **Limits:** the emulated CPU is still slow, so only light or old 3D programs are realistic. OpenGL 2.1 is enough for old games, not for modern ones. A Release with the GPU option has not been published yet.
+- **Limits:** the emulated CPU is still slow, so only light or old 3D programs are realistic. OpenGL 2.1 is enough for old games, not for modern ones.
 
 ## Screenshots
 **GPU drawing progress (14 October 2026):** glmark2, an OpenGL benchmark, running inside Debian on the Xbox. The terminal shows the renderer is `virgl (ANGLE ... Direct3D11)`, OpenGL 2.1, and an earlier finished run scored 246.
@@ -32,7 +32,11 @@ The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. N
 - Optional: a USB keyboard. The Xbox pointer works as a mouse inside Linux.
 
 ## Download
-No GitHub account needed: open the **[Releases page](../../releases/latest)** and download
+No GitHub account needed: open the **[Releases page](../../releases)**. Two kinds of download are kept there:
+- **Newest (version 1.2.42.0 and higher):** includes the experimental GPU drawing option.
+- **Original working version (1.2.19.0):** the stable version without GPU drawing. Pick this one if the newest gives you trouble.
+
+In each Release, download
 - the `.msix` file, and
 - the three x64 `.appx` dependency files.
 
