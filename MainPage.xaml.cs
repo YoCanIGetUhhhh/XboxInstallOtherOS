@@ -466,7 +466,7 @@ namespace XboxVmHost
         }
 
         // Screen size the virtual graphics card asks Linux to use. "Auto" lets Linux choose.
-        private static readonly string[] ScreenChoices = { "Auto", "1280x720", "1024x768", "800x600" };
+        private static readonly string[] ScreenChoices = { "Auto", "1280x720", "1024x768", "800x600", "GPU test" };
         private static string ScreenCfgPath { get { return Path.Combine(ApplicationData.Current.LocalFolder.Path, "screen.cfg"); } }
         private static string VmScreen
         {
@@ -684,6 +684,23 @@ namespace XboxVmHost
             RefreshStatus();
         }
 
+        // "Export log" adds what is in the log box to ONE file. Every press appends a new dated section, so older logs stay in the file.
+        private static string ExportFolderPath { get { return Path.Combine(ApplicationData.Current.LocalFolder.Path, "log-exports"); } }
+
+        private void ExportLogButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string text = LogText.Text;
+                if (string.IsNullOrWhiteSpace(text)) { Log("Nothing to export yet - the log is empty."); return; }
+                Directory.CreateDirectory(ExportFolderPath);
+                string name = "log-" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss") + ".txt";
+                File.WriteAllText(Path.Combine(ExportFolderPath, name), text.TrimEnd('\r', '\n') + "\r\n");
+                Log("Log saved to: LocalState\\log-exports\\" + name);
+            }
+            catch (Exception ex) { Log("Could not export the log: " + ex.GetType().Name + ": " + ex.Message); }
+        }
+
         private void ClearLogButton_Click(object sender, RoutedEventArgs e)
         {
             LogText.Text = "Log cleared.\n";
@@ -812,9 +829,13 @@ namespace XboxVmHost
                 "-smp", VmCpus.ToString(),
                 "-m", memoryMb,
                 "-nodefaults",
-                "-display", "none", "-monitor", "none", "-serial", "none"
+                "-monitor", "none", "-serial", "none"
             });
-            if (VmScreen == "Auto") list.AddRange(new string[] { "-vga", "std" });
+            // "GPU test": experimental Virgl graphics card drawn by ANGLE (Direct3D 11). Everything else keeps the plain card.
+            if (VmScreen == "GPU test") list.AddRange(new string[] { "-display", "egl-headless,gl=es", "-device", "virtio-vga-gl" });
+            else list.AddRange(new string[] { "-display", "none" });
+            if (VmScreen == "GPU test") { }
+            else if (VmScreen == "Auto") list.AddRange(new string[] { "-vga", "std" });
             else
             {
                 string[] wh = VmScreen.Split('x');
@@ -1541,6 +1562,19 @@ namespace XboxVmHost
         }
 
         // ---- Button: list storage folder ----
+        // Graphics test: starts ANGLE (OpenGL ES on Direct3D 11) off-screen and writes the report into the log box.
+        private async void GraphicsTestButton_Click(object sender, RoutedEventArgs e)
+        {
+            GraphicsTestButton.IsEnabled = false;
+            ResetLog();
+            Log("=== GRAPHICS TEST (ANGLE) ===");
+            string report;
+            try { report = await System.Threading.Tasks.Task.Run(() => AngleTest.Run()); }
+            catch (Exception ex) { report = "RESULT: FAILED - " + ex.GetType().Name + ": " + ex.Message; }
+            foreach (string line in report.Split('\n')) Log(line.TrimEnd('\r'));
+            GraphicsTestButton.IsEnabled = true;
+        }
+
         private async void ListFilesButton_Click(object sender, RoutedEventArgs e)
         {
             try

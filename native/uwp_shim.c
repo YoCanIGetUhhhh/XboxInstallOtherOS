@@ -13,6 +13,8 @@ __declspec(dllimport) PV  __stdcall CreateFiberEx(SZ, SZ, DW, PV, PV);
 __declspec(dllimport) PV  __stdcall ConvertThreadToFiberEx(PV, DW);
 __declspec(dllimport) DW  __stdcall WaitForMultipleObjectsEx(DW, const PV *, BOOL_, DW, BOOL_);
 __declspec(dllimport) void __stdcall SetLastError(DW);
+__declspec(dllimport) PV  __stdcall LoadPackagedLibrary(const unsigned short *, DW);
+__declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned, DW, const char *, int, unsigned short *, int);
 
 #define ERR_NOT_SUPPORTED 50UL
 
@@ -36,6 +38,16 @@ BOOL_ __stdcall PeekMessageW(PV m, PV h, unsigned a, unsigned b, unsigned r) { (
 BOOL_ __stdcall PostMessageW(PV h, unsigned m, unsigned long long w, long long l) { (void)h; (void)m; (void)w; (void)l; return 0; }
 BOOL_ __stdcall EnumResourceLanguagesA(PV m, const char *t, const char *n, PV f, long long p) { (void)m; (void)t; (void)n; (void)f; (void)p; return 0; }
 
+/* libepoxy (used by the graphics code) opens libEGL.dll with LoadLibraryA. In an app only
+   LoadPackagedLibrary is allowed, and it finds DLLs inside the app package. */
+PV __stdcall LoadLibraryW(const unsigned short *name) { return LoadPackagedLibrary(name, 0); }
+PV __stdcall LoadLibraryA(const char *name)
+{
+    unsigned short w[260];
+    if (!name || MultiByteToWideChar(65001, 0, name, -1, w, 260) <= 0) { SetLastError(87); return 0; }
+    return LoadPackagedLibrary(w, 0);
+}
+
 /* Structured-exception dispatcher: QEMU has no __try/__except blocks, so "keep looking" is correct. */
 int __C_specific_handler(PV rec, PV frame, PV ctx, PV disp) { (void)rec; (void)frame; (void)ctx; (void)disp; return 1; }
 
@@ -44,4 +56,4 @@ int __C_specific_handler(PV rec, PV frame, PV ctx, PV disp) { (void)rec; (void)f
 IMP(CreateFiber); IMP(ConvertThreadToFiber); IMP(CommConfigDialogA); IMP(GetDefaultCommConfigA);
 IMP(CoInitialize); IMP(GetDesktopWindow); IMP(GetUserNameW); IMP(SHGetKnownFolderPath);
 IMP(IsWindow); IMP(MessageBoxW); IMP(MsgWaitForMultipleObjectsEx); IMP(PeekMessageW);
-IMP(PostMessageW); IMP(EnumResourceLanguagesA); IMP(__C_specific_handler);
+IMP(LoadLibraryA); IMP(LoadLibraryW); IMP(PostMessageW); IMP(EnumResourceLanguagesA); IMP(__C_specific_handler);

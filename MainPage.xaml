@@ -89,6 +89,8 @@
                         Click="BootIsoButton_Click"/>
                 <Button x:Name="ListFilesButton" Content="Show storage folder" Style="{StaticResource MenuButton}"
                         Click="ListFilesButton_Click"/>
+                <Button x:Name="GraphicsTestButton" Content="Test graphics (ANGLE)" Style="{StaticResource MenuButton}"
+                        Click="GraphicsTestButton_Click"/>
             </StackPanel>
 
 
@@ -134,10 +136,14 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="6"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" x:Name="ClearLogButton" Content="Clear log" Style="{StaticResource MenuButton}"
                                 Margin="0" Click="ClearLogButton_Click"/>
-                        <Button Grid.Column="2" x:Name="SpeedSettingsButton" Content="Settings" Style="{StaticResource MainButton}"
+                        <Button Grid.Column="2" x:Name="ExportLogButton" Content="Export log" Style="{StaticResource MenuButton}"
+                                Margin="0" Click="ExportLogButton_Click"/>
+                        <Button Grid.Column="4" x:Name="SpeedSettingsButton" Content="Settings" Style="{StaticResource MainButton}"
                                 Margin="0" Click="SpeedSettingsButton_Click"/>
                     </Grid>
                 </Grid>

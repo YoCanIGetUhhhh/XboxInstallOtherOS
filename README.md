@@ -2,9 +2,16 @@
 
 Run a full Linux inside an app on your **Xbox Series X|S in Developer Mode**.
 
-The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. No hypervisor is available to Xbox apps, so it is much slower than a real PC, but it is good enough for a light desktop (XFCE) and for small servers.
+The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. No hypervisor is available to Xbox apps, so it is much slower than a real PC, but it is good enough for a light desktop (XFCE) and for small servers. Optional GPU drawing is being tested (see *Current state*).
 
 ![platform](https://img.shields.io/badge/platform-Xbox%20Dev%20Mode%20(UWP)-107C10)
+
+## Current state (14 October 2026)
+- **Working:** Debian 13 with the XFCE desktop runs in the app with a working pointer, network, save state and resume.
+- **Newest download:** the Releases page has version 1.2.19.0, which draws everything in software (no GPU).
+- **Experimental GPU drawing:** the source in this repository (version 1.2.41.0) can pass OpenGL drawing from Linux to the Xbox GPU (Virgl through ANGLE on Direct3D 11). On the Xbox it works: in Settings set **Screen size** to **GPU test**. Linux then reports an accelerated OpenGL 2.1 renderer, and the glmark2 test went from a score of 8 (software) to 246.
+- **Limits:** the emulated CPU is still slow, so only light or old 3D programs are realistic. OpenGL 2.1 is enough for old games, not for modern ones. A Release with the GPU option has not been published yet.
+- **Next:** try an old OpenGL game (EDuke32), turn off leftover debug output, and measure again.
 
 ## Screenshots
 **Main menu**
@@ -77,7 +84,7 @@ Ctrl + Alt + Shift + V stops the virtual PC, saves its memory and devices to a f
 ## Good to know
 - The virtual PC stops when the app leaves the foreground (Guide button, Home). Use save state first.
 - QEMU can run once per app start; the app restarts itself when the virtual PC ends.
-- There is no GPU acceleration. A light desktop such as XFCE works; heavy 3D does not.
+- GPU drawing is experimental (see *Current state*). Without it, drawing is done in software: a light desktop such as XFCE works, heavy 3D does not.
 - The Linux network card can change name when virtual devices change (for example `ens3` becomes `ens4`). If the network stops working after changing settings, look at `ip a` and fix the name in `/etc/network/interfaces`.
 - Memory limit is set by the Xbox. Four CPUs or very large RAM settings can crash the app.
 
@@ -87,8 +94,10 @@ Steam: [YoCanIGetUhhhh](https://steamcommunity.com/profiles/76561198072420605)
 Progress posts: [Xbox VM running Linux](https://www.reddit.com/r/XboxRetailHomebrew/comments/1x1xrli/xbox_vm_running_linux/) and [Xbox VM update](https://www.reddit.com/r/XboxRetailHomebrew/comments/1x2pidd/xboxvmupdate/) on r/XboxRetailHomebrew.
 
 ## License and credits
-This project is released under the **GNU General Public License v2** (see `LICENSE`), the same license as QEMU.
-- [QEMU](https://www.qemu.org/) (GPL-2.0) and [libslirp](https://gitlab.freedesktop.org/slirp/libslirp) (BSD) provide the emulation and the user-mode network.
+This project is released under the **GNU General Public License v2** (see `LICENSE`), the same license as QEMU. `LICENSE` also lists the licenses of the other parts the app is built from.
+- [QEMU](https://www.qemu.org/) (GPL-2.0) and [libslirp](https://gitlab.freedesktop.org/slirp/libslirp) (BSD-3-Clause) provide the emulation and the user-mode network.
+- [virglrenderer](https://gitlab.freedesktop.org/virgl/virglrenderer) and [libepoxy](https://github.com/anholt/libepoxy) (MIT) provide the optional GPU drawing.
+- [ANGLE](https://github.com/google/angle) (BSD-3-Clause) turns OpenGL ES into Direct3D 11 on the Xbox.
 - Tux the penguin is the Linux mascot.
 
 ---

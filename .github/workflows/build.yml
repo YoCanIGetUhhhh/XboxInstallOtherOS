@@ -11,14 +11,132 @@ on:
         description: "Only when the QEMU box is unticked: the number of an earlier run whose QEMU files should be reused (the number at the end of that run's web address)."
         type: string
         default: ""
+      gpu_probe:
+        description: "Virgl check only (no app, no QEMU DLL): tries to build the graphics pieces and reports what works on the Summary page."
+        type: boolean
+        default: false
       make_release:
         description: "Also publish the finished package as a public Release (a download page anyone can use without a GitHub account)."
         type: boolean
         default: false
 
 jobs:
+  gpu_probe:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.gpu_probe }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Set up the MSYS2 build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git make diffutils
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-pixman
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-libslirp
+
+      - name: 1. Which graphics packages does MSYS2 offer?
+        id: pkgs
+        continue-on-error: true
+        run: |
+          S=$(cygpath -u "$GITHUB_STEP_SUMMARY")
+          { echo '## Virgl check (Stage 1)'; echo; echo '### 1. Packages MSYS2 offers (virgl, epoxy, angle)'; echo '```'; } >> "$S"
+          pacman -Ss 'virgl|epoxy|angle' 2>&1 | grep -i 'ucrt64\|ucrt-x86_64' | head -40 >> "$S" || true
+          echo '```' >> "$S"
+          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-libepoxy 2>&1 | tail -5
+
+      - name: 2. Build virglrenderer from source
+        id: virgl
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-python-yaml mingw-w64-ucrt-x86_64-libepoxy
+          git clone --depth 1 https://gitlab.freedesktop.org/virgl/virglrenderer.git virgl-src
+          cd virgl-src
+          git log -1 --format='virglrenderer commit %h %ad' --date=short
+          # Windows has no <sys/ioccom.h> (Linux/BSD DRM header). The ioctls are never used here, so a stand-in is enough to compile.
+          mkdir -p ../shim/sys
+          cat > ../shim/sys/ioccom.h <<'HDREOF'
+          #ifndef SHIM_IOCCOM_H
+          #define SHIM_IOCCOM_H
+          #define _IOC(dir,type,nr,size) (((dir)<<30)|((size)<<16)|((type)<<8)|(nr))
+          #define _IO(g,n) _IOC(0,(g),(n),0)
+          #define _IOR(g,n,t) _IOC(2,(g),(n),sizeof(t))
+          #define _IOW(g,n,t) _IOC(1,(g),(n),sizeof(t))
+          #define _IOWR(g,n,t) _IOC(3,(g),(n),sizeof(t))
+          #endif
+          HDREOF
+          export CFLAGS="-I$PWD/../shim"
+          meson setup build --prefix="$MSYSTEM_PREFIX" -Dtests=false -Dplatforms=egl 2>&1 | tee ../virgl-setup.log
+          ninja -C build 2>&1 | tee ../virgl-build.log
+          ninja -C build install 2>&1 | tail -5
+
+      - name: 3. Get QEMU 10.0.0 and try to configure it with Virgl
+        id: qemucfg
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          git clone --depth 1 --branch v10.0.0 https://github.com/qemu/qemu.git qemu-src
+          python -m pip install --break-system-packages pycotap
+          mkdir -p qemu-src/build
+          cd qemu-src/build
+          ../configure --static --target-list=x86_64-softmmu --without-default-features --enable-tcg --enable-slirp --enable-opengl --enable-virglrenderer --disable-werror 2>&1 | tee configure.log
+
+      - name: 4. Compile QEMU's Virgl graphics device
+        id: qemubuild
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cd qemu-src/build
+          T=$(ninja -t targets all | grep -i 'virtio-gpu-virgl.c.o' | head -1 | cut -d: -f1)
+          echo "target: $T"
+          test -n "$T"
+          ninja "$T" 2>&1 | tee build.log
+
+      - name: Put the results on the Summary page
+        if: always()
+        run: |
+          set +e
+          S=$(cygpath -u "$GITHUB_STEP_SUMMARY")
+          {
+            echo
+            echo '### Results'
+            echo "- 1. packages listed: ${{ steps.pkgs.outcome }}"
+            echo "- 2. virglrenderer builds: ${{ steps.virgl.outcome }}"
+            echo "- 3. QEMU configure with Virgl: ${{ steps.qemucfg.outcome }}"
+            echo "- 4. QEMU Virgl device compiles: ${{ steps.qemubuild.outcome }}"
+          } >> "$S"
+          # Also post each result as a short note (annotation) so it can be read without opening the logs.
+          note() { m=$(printf '%s' "$2" | cut -c1-300 | tr '\r' ' ' | sed ':a;N;$!ba;s/\n/%0A/g'); echo "::notice title=$1::$m"; }
+          note "RESULT 1 packages" "${{ steps.pkgs.outcome }}"
+          note "RESULT 2 virglrenderer build" "${{ steps.virgl.outcome }}"
+          note "RESULT 3 QEMU configure with Virgl" "${{ steps.qemucfg.outcome }}"
+          note "RESULT 4 QEMU Virgl device compile" "${{ steps.qemubuild.outcome }}"
+          for f in virgl-setup.log virgl-build.log qemu-src/build/configure.log qemu-src/build/build.log; do
+            if [ -f "$f" ]; then
+              body=$(tail -n 12 "$f" | cut -c1-220 | tr '\r' ' ')
+              m=$(printf '%s' "$body" | sed ':a;N;$!ba;s/\n/%0A/g')
+              echo "::notice title=LOG TAIL $f::$m"
+              { echo "#### $f"; echo '```'; tail -n 30 "$f"; echo '```'; } >> "$S"
+            else
+              echo "::notice title=LOG TAIL $f::file does not exist (step did not get that far)"
+            fi
+          done
+          exit 0
+
   qemu:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.with_qemu }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.with_qemu && !inputs.gpu_probe) }}
     runs-on: windows-latest
     timeout-minutes: 120
     defaults:
@@ -44,9 +162,52 @@ jobs:
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-libslirp
+            mingw-w64-ucrt-x86_64-ccache
+
+      - name: Restore the compiled QEMU files from earlier builds
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-qemu-${{ github.run_id }}
+          restore-keys: |
+            ccache-qemu-
+
+      - name: Point the compile cache at that folder
+        run: |
+          E=$(cygpath -u "$GITHUB_ENV")
+          echo "CCACHE_DIR=$(cygpath -u "$GITHUB_WORKSPACE")/.ccache" >> "$E"
+          echo "CCACHE_MAXSIZE=1500M" >> "$E"
+          echo "CCACHE_BASEDIR=$(cygpath -u "$GITHUB_WORKSPACE")" >> "$E"
+          echo "CCACHE_NOHASHDIR=1" >> "$E"
 
       - name: Install the Python helper QEMU needs
         run: python -m pip install --break-system-packages pycotap
+
+      - name: Build virglrenderer (translates the guest's graphics calls) as a static library
+        run: |
+          set -eo pipefail
+          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-python-yaml mingw-w64-ucrt-x86_64-libepoxy
+          git clone --depth 1 https://gitlab.freedesktop.org/virgl/virglrenderer.git virgl-src
+          git -C virgl-src log -1 --format='virglrenderer commit %h %ad' --date=short
+          python native/patch_virgl_for_angle.py || { echo "VIRGL PATCH FAILED"; cat virgl-patch.txt 2>/dev/null; echo "::error title=virglrenderer patch failed::$(head -c 1500 virgl-patch.txt 2>/dev/null | tr '\n' ' ')"; exit 1; }
+          # Windows has no <sys/ioccom.h> (Linux/BSD DRM header). The ioctls are never used here, so a stand-in is enough to compile.
+          mkdir -p shim/sys
+          cat > shim/sys/ioccom.h <<'HDREOF'
+          #ifndef SHIM_IOCCOM_H
+          #define SHIM_IOCCOM_H
+          #define _IOC(dir,type,nr,size) (((dir)<<30)|((size)<<16)|((type)<<8)|(nr))
+          #define _IO(g,n) _IOC(0,(g),(n),0)
+          #define _IOR(g,n,t) _IOC(2,(g),(n),sizeof(t))
+          #define _IOW(g,n,t) _IOC(1,(g),(n),sizeof(t))
+          #define _IOWR(g,n,t) _IOC(3,(g),(n),sizeof(t))
+          #endif
+          HDREOF
+          cd virgl-src
+          CFLAGS="-I$PWD/../shim" meson setup build --prefix="$MSYSTEM_PREFIX" -Dtests=false -Dplatforms=egl --default-library=static
+          ninja -C build
+          ninja -C build install
+          pkg-config --modversion virglrenderer
+          pkg-config --static --libs virglrenderer
 
       - name: Get the QEMU source
         run: git clone --depth 1 --branch v10.0.0 https://github.com/qemu/qemu.git qemu-src
@@ -61,6 +222,18 @@ jobs:
           sed -i 's/^    status = qemu_main_loop();/    uwp_after_init();\n    status = qemu_main_loop();/' qemu-src/system/main.c
           grep -n "uwp_after_init" qemu-src/system/main.c
           test "$(grep -c uwp_after_init qemu-src/system/main.c)" = "2"
+
+      - name: Skip QEMU's Direct3D device lookup (the OpenGL loader cannot resolve it before a context exists)
+        run: |
+          set -e
+          sed -i 's/^#ifdef EGL_D3D11_DEVICE_ANGLE/#if 0 \/* EGL_D3D11_DEVICE_ANGLE skipped for the Xbox app *\//' qemu-src/ui/egl-helpers.c
+          grep -n "EGL_D3D11_DEVICE_ANGLE skipped" qemu-src/ui/egl-helpers.c
+          test "$(grep -c 'EGL_D3D11_DEVICE_ANGLE skipped' qemu-src/ui/egl-helpers.c)" = "1"
+
+      - name: Make QEMU's OpenGL helper code work with ANGLE (OpenGL ES 3 on Direct3D 11)
+        run: |
+          set -e
+          python native/patch_egl_for_angle.py
 
       - name: Let QEMU's code generator use the memory calls an Xbox app is allowed to use
         run: |
@@ -97,7 +270,7 @@ jobs:
           set -o pipefail
           mkdir -p qemu-src/build
           cd qemu-src/build
-          ../configure --static --target-list=x86_64-softmmu --without-default-features --enable-tcg --enable-slirp --disable-werror 2>&1 | tee configure.log
+          ../configure --cc="ccache gcc" --static --target-list=x86_64-softmmu --without-default-features --enable-tcg --enable-slirp --enable-opengl --enable-virglrenderer --disable-werror 2>&1 | tee configure.log
 
       - name: Build QEMU
         run: |
@@ -106,6 +279,14 @@ jobs:
           # The last step (linking the .exe) is expected to fail on a missing iconv library.
           # Everything is compiled by then, and the next step does the final link itself.
           make -j4 qemu-system-x86_64.exe 2>&1 | tee build.log || echo "NOTE: make reported a problem (expected if only the final link failed)"
+          ccache -s 2>&1 | tee ccache-stats.txt || true
+
+      - name: Keep the compiled QEMU files for the next build
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-qemu-${{ github.run_id }}
 
       - name: Find the UWP-allowed function list (WindowsApp.lib)
         shell: pwsh
@@ -122,6 +303,9 @@ jobs:
           gcc -O2 -c -o uwp_shim.o ../../native/uwp_shim.c
           gcc -O2 -c -o uwp_jit.o ../../native/uwp_jit.c
           python ../../native/compile_like_qemu.py ../../native/uwp_display.c uwp_display.o
+          # QEMU's own build left the egl-headless display out (no object file for it), so compile it here the same way.
+          python ../../native/compile_like_qemu.py ../ui/egl-headless.c egl_headless.o || echo "NOTE: egl-headless.c did not compile"
+          ls -l egl_headless.o || true
           rm -f qemu-system-x86_64.exe
           ninja -d keeprsp qemu-system-x86_64.exe || echo "NOTE: exe link failed again (expected); continuing with the DLL link"
           ls -l qemu-system-x86_64.exe.rsp
@@ -138,9 +322,30 @@ jobs:
           wa = subprocess.check_output(["cygpath", "-m", os.environ["WINDOWSAPP_LIB"]]).decode().strip()
           # WindowsApp.lib goes last, so it only supplies what nothing else does (VirtualAllocFromApp and friends).
           s2 = s2.rstrip() + "\n-Wl,--wrap=exit\n-Wl,-Bstatic\n-liconv\n-Wl,-Bdynamic\n\"" + wa + "\"\n"
+          # QEMU's build did not compile the egl-headless display; we compiled it ourselves (egl_headless.o).
+          extra = ["egl_headless.o"] if os.path.exists("egl_headless.o") else []
+          allnames = []
+          for root, dirs, files in os.walk("."):
+              for f in files:
+                  if ("egl" in f or "virtio-gpu" in f or "virtio-vga" in f) and f.endswith((".obj", ".o")):
+                      allnames.append(f)
+          print("extra objects for the link:", extra)
+          open("forced-objects.txt", "w").write(" ".join(extra) + "\n\nall candidates: " + " ".join(sorted(allnames)) + "\n")
+          open("qemu-dll-plain.rsp", "w").write(s2)
+          s2 = "\n".join('"%s"' % x for x in extra) + "\n" + s2
           open("qemu-dll.rsp", "w").write(s2)
           PYEOF
-          cc -m64 @qemu-dll.rsp
+          set +e
+          cc -m64 @qemu-dll.rsp > dll-link.log 2>&1
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            echo "FORCED-OBJECT LINK FAILED (code $rc); linking again without the forced objects"
+            echo "FORCED-OBJECT LINK FAILED (code $rc), fell back to a plain link" > forced-link-status.txt
+            cc -m64 @qemu-dll-plain.rsp
+          else
+            echo "forced-object link OK" > forced-link-status.txt
+          fi
           ls -l qemu.dll
 
       - name: Check the DLL against the UWP-allowed list
@@ -150,10 +355,64 @@ jobs:
           python -m pip install --break-system-packages pefile
           cp "$(cygpath -u "$WINDOWSAPP_LIB")" windowsapp.lib
           nm -g windowsapp.lib > windowsapp_symbols.txt 2>/dev/null || true
-          for f in CreateFiberEx ConvertThreadToFiberEx WaitForMultipleObjectsEx SetLastError; do
+          for f in CreateFiberEx ConvertThreadToFiberEx WaitForMultipleObjectsEx SetLastError LoadPackagedLibrary MultiByteToWideChar; do
             if grep -qw "$f" windowsapp_symbols.txt; then echo "allowed: $f"; else echo "MISSING from allowed list: $f"; fi
           done
           python native/uwp_audit.py qemu-src/build/qemu.dll windowsapp_symbols.txt "$MSYSTEM_PREFIX/bin" 2>&1 | tee uwp-audit.txt
+
+      - name: What graphics code is inside qemu.dll
+        id: gfxsyms
+        continue-on-error: true
+        run: |
+          {
+            echo "virgl_renderer_ functions in qemu.dll: $(nm qemu-src/build/qemu.dll | grep -c ' [TtDd] _\?virgl_renderer_')"
+            echo "epoxy_ symbols in qemu.dll: $(nm qemu-src/build/qemu.dll | grep -c 'epoxy_')"
+            echo "egl_init / qemu_egl_ symbols: $(nm qemu-src/build/qemu.dll | grep -c 'egl_init\|qemu_egl_')"
+            echo "egl_headless / virtio_gpu_gl symbols: $(nm qemu-src/build/qemu.dll | grep -ci 'egl_headless\|virtio_gpu_gl\|virtio_gpu_virgl')"
+            echo "forced objects: $(cat qemu-src/build/forced-objects.txt | tr '\n' ' ')"; grep -n "egl-headless\|virtio-gpu-gl" qemu-src/build/build.ninja | head -5
+            echo "register_egl / qemu_display_egl symbols: $(nm qemu-src/build/qemu.dll | grep -c 'register_egl\|qemu_display_egl\|egl_headless')"
+            echo "LoadLibrary mentions in qemu.dll imports:"; objdump -p qemu-src/build/qemu.dll | grep -i 'LoadLibrary\|DLL Name' | head -30
+          } 2>&1 | tee gfx-symbols.txt
+
+      - name: Post the check result as readable notes (annotations)
+        if: always()
+        run: |
+          set +e
+          emit() {
+            python - "$1" "$2" "$3" <<'PYEOF'
+          import sys
+          t, f, tail = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          try:
+              s = open(f, errors="replace").read().replace("\r", "")
+          except Exception:
+              print("::notice title=%s::file missing: %s" % (t, f)); sys.exit(0)
+          lines = s.split("\n")
+          if tail:
+              lines = lines[-tail:]
+          chunks, cur = [], ""
+          for line in lines:
+              line = line[:300]
+              if len(cur) + len(line) + 1 > 3000:
+                  chunks.append(cur); cur = ""
+              cur += line + "\n"
+          if cur:
+              chunks.append(cur)
+          for i, c in enumerate(chunks[:8]):
+              m = c.replace("%", "%25").replace("\n", "%0A")
+              print("::notice title=%s (%d/%d)::%s" % (t, i + 1, len(chunks), m))
+          PYEOF
+          }
+          echo "::notice title=AUDIT OUTCOME::${{ steps.audit.outcome }}"
+          emit "VIRGL PATCH" virgl-patch.txt 0
+          emit "VIRGL SAMPLER CODE" virgl-dump.txt 0
+          emit "COMPILE CACHE" qemu-src/build/ccache-stats.txt 0
+          emit "UWP AUDIT REPORT" uwp-audit.txt 0
+          emit "GRAPHICS CODE IN QEMU.DLL" gfx-symbols.txt 0
+          emit "FORCED LINK STATUS" qemu-src/build/forced-link-status.txt 0
+          emit "FORCED LINK ERRORS (tail)" qemu-src/build/dll-link.log 30
+          emit "QEMU CONFIGURE (tail)" qemu-src/build/configure.log 25
+          emit "QEMU BUILD (tail)" qemu-src/build/build.log 40
+          exit 0
 
       - name: Put the check report on the Summary page
         if: always()
@@ -174,7 +433,7 @@ jobs:
           if [ "${{ steps.audit.outcome }}" = "success" ]; then
             cp qemu-src/build/qemu.dll qemudll/
             mkdir -p qemudll/pc-bios
-            for f in bios-256k.bin bios.bin kvmvapic.bin linuxboot_dma.bin multiboot_dma.bin pvh.bin vgabios.bin vgabios-stdvga.bin vgabios-cirrus.bin; do
+            for f in bios-256k.bin bios.bin kvmvapic.bin linuxboot_dma.bin multiboot_dma.bin pvh.bin vgabios.bin vgabios-stdvga.bin vgabios-cirrus.bin vgabios-virtio.bin; do
               cp qemu-src/pc-bios/$f qemudll/pc-bios/ || echo "missing firmware file: $f"
             done
             ls -l qemudll/pc-bios
@@ -202,6 +461,7 @@ jobs:
         with:
           name: qemudll
           path: qemudll/
+          retention-days: 14
           if-no-files-found: warn
 
   build:
@@ -209,7 +469,7 @@ jobs:
     permissions:
       contents: write
       actions: read
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && !inputs.gpu_probe }}
     runs-on: windows-latest
     steps:
       - name: Get the code
@@ -238,6 +498,24 @@ jobs:
           if (Test-Path qemudll\pc-bios) { New-Item -ItemType Directory -Force pc-bios | Out-Null; Get-ChildItem qemudll\pc-bios | Move-Item -Destination pc-bios -Force }
           if (Test-Path pc-bios) { Get-ChildItem pc-bios | Format-Table Name, Length }
           Get-ChildItem *.dll | Format-Table Name, Length
+
+      - name: Get ANGLE (OpenGL ES on Direct3D 11) for the graphics test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/ANGLE.WindowsStore/2.1.13" -OutFile angle.zip
+          Expand-Archive angle.zip angle-pkg -Force
+          $all = Get-ChildItem angle-pkg -Recurse -File | Where-Object { $_.Extension -in ".dll", ".winmd" }
+          $list = ($all | ForEach-Object { $_.FullName.Substring((Resolve-Path angle-pkg).Path.Length) + " (" + $_.Length + ")" }) -join " | "
+          Write-Host "::notice title=ANGLE package files::$list"
+          $egl = $all | Where-Object { $_.Name -eq "libEGL.dll" -and $_.FullName -match "x64" } | Select-Object -First 1
+          $gles = $all | Where-Object { $_.Name -eq "libGLESv2.dll" -and $_.FullName -match "x64" } | Select-Object -First 1
+          if (-not $egl -or -not $gles) { Write-Host "::error::Could not find the x64 libEGL.dll / libGLESv2.dll in the ANGLE package"; exit 1 }
+          Copy-Item $egl.FullName . -Force
+          Copy-Item $gles.FullName . -Force
+          Write-Host "Using $($egl.FullName)"
+          Write-Host "Using $($gles.FullName)"
+          Get-ChildItem libEGL.dll, libGLESv2.dll | Format-Table Name, Length
 
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -283,6 +561,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: XboxVmHost-package
+          retention-days: 14
           path: |
             out/**
             XboxVmHostTest.cer

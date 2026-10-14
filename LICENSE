@@ -1,3 +1,23 @@
+Install Other OS
+Copyright (C) 2026 Thomas (YoCanIGetUhhhh)
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 2, as published by the
+Free Software Foundation. The full text of that license follows below.
+
+Other software used by this project keeps its own license:
+  - QEMU 10.0.0 ............ GNU GPL v2 (some parts under MIT/BSD licenses)
+  - libslirp ............... BSD 3-Clause
+  - virglrenderer .......... MIT
+  - libepoxy ............... MIT
+  - ANGLE (ANGLE.WindowsStore NuGet package) ... BSD 3-Clause,
+    Copyright The ANGLE Project Authors
+  - glib, pixman and the other libraries built together with QEMU keep their
+    own licenses. Their source comes from the upstream projects named in
+    .github/workflows/build.yml.
+
+----------------------------------------------------------------------------
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 2, June 1991
 
