@@ -13,6 +13,10 @@ The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. N
 - **Limits:** the emulated CPU is still slow, so only light or old 3D programs are realistic. OpenGL 2.1 is enough for old games, not for modern ones. A Release with the GPU option has not been published yet.
 
 ## Screenshots
+**GPU drawing progress (14 October 2026):** glmark2, an OpenGL benchmark, running inside Debian on the Xbox. The terminal shows the renderer is `virgl (ANGLE ... Direct3D11)`, OpenGL 2.1, and an earlier finished run scored 246.
+
+![glmark2 with GPU drawing](screenshots/gpu-glmark2.png)
+
 **Main menu**
 
 ![Main menu](screenshots/main-menu.png)
