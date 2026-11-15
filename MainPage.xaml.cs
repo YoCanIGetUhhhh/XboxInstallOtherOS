@@ -252,13 +252,13 @@ namespace XboxVmHost
             _marqueeTimer.Start();
         }
 
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_main")]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_main", ExactSpelling = true)]
         private static extern int qemu_dll_main(IntPtr outfile, int argc, IntPtr argv);
 
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_hmp", CharSet = CharSet.Ansi)]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_hmp", CharSet = CharSet.Ansi, ExactSpelling = true)]
         private static extern int qemu_dll_hmp([MarshalAs(UnmanagedType.LPStr)] string cmd, StringBuilder outText, int cap, int timeoutMs);
 
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_stop")]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_stop", ExactSpelling = true)]
         private static extern void qemu_dll_stop();
 
         private string QemuOutPath
@@ -303,16 +303,16 @@ namespace XboxVmHost
         // =====================================================================
         // The virtual PC's screen, keyboard, mouse
         // =====================================================================
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_get_frame")]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_get_frame", ExactSpelling = true)]
         private static extern int qemu_dll_get_frame(byte[] dst, int capBytes, out int w, out int h, ref int seq);
 
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_key")]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_key", ExactSpelling = true)]
         private static extern void qemu_dll_key(int keyNumber, int down);
 
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_abs")]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_abs", ExactSpelling = true)]
         private static extern void qemu_dll_abs(int x, int y, int wheel, int buttons);
 
-        [DllImport("qemu.dll", EntryPoint = "qemu_dll_mouse")]
+        [DllImport("qemu.dll", EntryPoint = "qemu_dll_mouse", ExactSpelling = true)]
         private static extern void qemu_dll_mouse(int dx, int dy, int wheel, int buttons);
 
         private bool _vmActive;
