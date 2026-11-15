@@ -818,7 +818,13 @@ namespace XboxVmHost
 
         private void AddPointer(List<string> extra)
         {
-            if (MouseOn) extra.AddRange(new string[] { "-device", "virtio-tablet-pci" });
+            if (!MouseOn) return;
+
+            extra.AddRange(new[]
+            {
+                "-device", "qemu-xhci,id=xhci",
+                "-device", "usb-tablet,bus=xhci.0"
+            });
         }
 
         private void AddNetwork(List<string> extra)
@@ -847,7 +853,7 @@ namespace XboxVmHost
             list.AddRange(new string[] {
                 "qemu-system-x86_64",
                 "-L", biosDir,
-                "-M", "pc,usb=off,hpet=off",
+                "-M", "pc,hpet=off",
                 "-accel", "tcg,thread=" + (VmCpus > 1 ? "multi" : "single") + ",tb-size=" + VmTbMb,
                 "-cpu", VmCpuModel,
                 "-smp", VmCpus.ToString(),

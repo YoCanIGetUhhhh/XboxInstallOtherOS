@@ -263,7 +263,7 @@ EXPORT void qemu_dll_mouse(int dx, int dy, int wheel, int buttons)
     queue_push(&ev);
 }
 
-/* x, y: where the pointer is, 0..32767 across the whole virtual screen (for the virtio-tablet device).
+/* x, y: where the pointer is, 0..32767 across the whole virtual screen (for the USB tablet device).
    wheel: >0 up, <0 down.  buttons: 1 left, 2 right, 4 middle (held now). */
 EXPORT void qemu_dll_abs(int x, int y, int wheel, int buttons)
 {
