@@ -822,8 +822,7 @@ namespace XboxVmHost
 
             extra.AddRange(new[]
             {
-                "-device", "qemu-xhci,id=xhci",
-                "-device", "usb-tablet,bus=xhci.0"
+                "-device", "usb-tablet"
             });
         }
 
@@ -853,7 +852,7 @@ namespace XboxVmHost
             list.AddRange(new string[] {
                 "qemu-system-x86_64",
                 "-L", biosDir,
-                "-M", "pc,hpet=off",
+                "-M", "pc,usb=on,hpet=off",
                 "-accel", "tcg,thread=" + (VmCpus > 1 ? "multi" : "single") + ",tb-size=" + VmTbMb,
                 "-cpu", VmCpuModel,
                 "-smp", VmCpus.ToString(),
