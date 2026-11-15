@@ -38,6 +38,20 @@ BOOL_ __stdcall PeekMessageW(PV m, PV h, unsigned a, unsigned b, unsigned r) { (
 BOOL_ __stdcall PostMessageW(PV h, unsigned m, unsigned long long w, long long l) { (void)h; (void)m; (void)w; (void)l; return 0; }
 BOOL_ __stdcall EnumResourceLanguagesA(PV m, const char *t, const char *n, PV f, long long p) { (void)m; (void)t; (void)n; (void)f; (void)p; return 0; }
 
+/* libslirp uses this optional Windows ICMP helper for guest ping support.
+   Xbox UWP does not allow the iphlpapi import, so report it unavailable;
+   slirp continues to provide normal TCP/UDP networking. */
+unsigned long __stdcall IcmpSendEcho2Ex(PV h, PV e, PV a, PV c, unsigned long s,
+                                         unsigned long d, PV data, unsigned short size,
+                                         PV opt, PV reply, unsigned long reply_size,
+                                         unsigned long timeout)
+{
+    (void)h; (void)e; (void)a; (void)c; (void)s; (void)d; (void)data;
+    (void)size; (void)opt; (void)reply; (void)reply_size; (void)timeout;
+    SetLastError(ERR_NOT_SUPPORTED);
+    return 0;
+}
+
 /* libepoxy (used by the graphics code) opens libEGL.dll with LoadLibraryA. In an app only
    LoadPackagedLibrary is allowed, and it finds DLLs inside the app package. */
 PV __stdcall LoadLibraryW(const unsigned short *name) { return LoadPackagedLibrary(name, 0); }
@@ -57,3 +71,4 @@ IMP(CreateFiber); IMP(ConvertThreadToFiber); IMP(CommConfigDialogA); IMP(GetDefa
 IMP(CoInitialize); IMP(GetDesktopWindow); IMP(GetUserNameW); IMP(SHGetKnownFolderPath);
 IMP(IsWindow); IMP(MessageBoxW); IMP(MsgWaitForMultipleObjectsEx); IMP(PeekMessageW);
 IMP(LoadLibraryA); IMP(LoadLibraryW); IMP(PostMessageW); IMP(EnumResourceLanguagesA); IMP(__C_specific_handler);
+IMP(IcmpSendEcho2Ex);
