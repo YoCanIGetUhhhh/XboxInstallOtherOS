@@ -907,6 +907,10 @@ namespace XboxVmHost
             _vmDone = false;
             _vmResult = -999;
             _tablet = MouseOn;
+            _absX = 16384; _absY = 16384; _absWheel = 0; _absDirty = true;
+            _controllerPositionReady = false;
+            _controllerButtons = 0;
+            _controllerLastPoll = default(DateTime);
             _havePos = false; _havePosX = false; _gotCore = false; _gotRawMouse = false;
             _debugOn = false; VmDebug.Visibility = _debugOn ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1212,6 +1216,7 @@ namespace XboxVmHost
             if (!_vmActive) return;
             if (_vmDone) { EndVm(); return; }
             if (_stopAsked && (DateTime.UtcNow - _stopAskedAt).TotalSeconds > 15) { EndVm(); return; }
+            PollController();
             if (_tablet) FlushAbs();
             if (_debugOn)
             {
@@ -1427,6 +1432,66 @@ namespace XboxVmHost
         private bool _gotCore, _havePosX, _debugOn;
         private Windows.Foundation.Point _lastPosX;
         private string _dbgType = "none";
+        private double _controllerX, _controllerY;
+        private bool _controllerPositionReady;
+        private int _controllerButtons;
+        private DateTime _controllerLastPoll;
+
+        private void PollController()
+        {
+            if (!_tablet || Windows.Gaming.Input.Gamepad.Gamepads.Count == 0) return;
+
+            try
+            {
+                var pad = Windows.Gaming.Input.Gamepad.Gamepads[0];
+                var reading = pad.GetCurrentReading();
+                if (!_controllerPositionReady)
+                {
+                    _controllerX = _absX;
+                    _controllerY = _absY;
+                    _controllerPositionReady = true;
+                }
+
+                DateTime now = DateTime.UtcNow;
+                double dt = _controllerLastPoll == default(DateTime)
+                    ? 0.016
+                    : Math.Min(0.05, Math.Max(0.001, (now - _controllerLastPoll).TotalSeconds));
+                _controllerLastPoll = now;
+
+                double sx = ApplyStickDeadzone(reading.LeftThumbstickX);
+                double sy = ApplyStickDeadzone(reading.LeftThumbstickY);
+                if (sx != 0 || sy != 0)
+                {
+                    const double speed = 26000.0;
+                    _controllerX = Math.Max(0, Math.Min(32767, _controllerX + sx * speed * dt));
+                    _controllerY = Math.Max(0, Math.Min(32767, _controllerY - sy * speed * dt));
+                    _absX = (int)_controllerX;
+                    _absY = (int)_controllerY;
+                    _absDirty = true;
+                }
+
+                int buttons = 0;
+                if ((reading.Buttons & Windows.Gaming.Input.GamepadButtons.A) != 0) buttons |= 1;
+                if ((reading.Buttons & Windows.Gaming.Input.GamepadButtons.B) != 0) buttons |= 2;
+                if ((reading.Buttons & Windows.Gaming.Input.GamepadButtons.X) != 0) buttons |= 4;
+                if (buttons != _controllerButtons)
+                {
+                    _controllerButtons = buttons;
+                    _mouseButtons = buttons;
+                    _absDirty = true;
+                }
+            }
+            catch { }
+        }
+
+        private static double ApplyStickDeadzone(double value)
+        {
+            const double deadzone = 0.18;
+            double magnitude = Math.Abs(value);
+            if (magnitude <= deadzone) return 0;
+            return Math.Sign(value) * (magnitude - deadzone) / (1.0 - deadzone);
+        }
+
         private void VmPointerMoved(CoreWindow sender, PointerEventArgs e)
         {
             if (!_vmActive) return;
@@ -1480,6 +1545,7 @@ namespace XboxVmHost
             double fx = (p.X - (W - dw) / 2) / dw, fy = (p.Y - (H - dh) / 2) / dh;
             fx = Math.Max(0, Math.Min(1, fx)); fy = Math.Max(0, Math.Min(1, fy));
             _absX = (int)(fx * 32767); _absY = (int)(fy * 32767);
+            if (_controllerPositionReady) { _controllerX = _absX; _controllerY = _absY; }
             if (wheel != 0) _absWheel = wheel;
             _absDirty = true;
         }
