@@ -29,7 +29,7 @@ The app uses [QEMU](https://www.qemu.org/) 10.0.0 to emulate a PC in software. N
 - An Xbox Series X|S with **Developer Mode** turned on and the **Device Portal** enabled
 - A PC or phone on the same network (to use the Device Portal in a web browser)
 - An ISO of a Linux distro of your choice to install from (a small *netinst*-style image is a good fit). Debian 13 was used while building this.
-- Optional: a USB keyboard. The Xbox pointer works as a mouse inside Linux.
+- Optional: a USB keyboard. Pointer input uses a standard USB HID tablet, which works with both Linux and Windows guests. Disk and network VirtIO devices may still require separate Windows VirtIO drivers.
 
 ## Download
 No GitHub account needed: open the **[Releases page](../../releases)**. Two kinds of download are kept there:
