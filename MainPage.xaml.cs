@@ -357,6 +357,7 @@ namespace XboxVmHost
                 _vkMap[VirtualKey.Left] = 0xCB;
                 _vkMap[VirtualKey.Right] = 0xCD;
                 _vkMap[VirtualKey.Down] = 0xD0;
+                _vkMap[VirtualKey.GamepadDPadUp] = 0xC8; _vkMap[VirtualKey.GamepadDPadDown] = 0xD0; _vkMap[VirtualKey.GamepadDPadLeft] = 0xCB; _vkMap[VirtualKey.GamepadDPadRight] = 0xCD; _vkMap[VirtualKey.GamepadA] = 0x1C; _vkMap[VirtualKey.GamepadB] = 0x0E;
                 _vkMap[VirtualKey.Delete] = 0xD3;
                 for (int f = 0; f < 10; f++) _vkMap[(VirtualKey)((int)VirtualKey.F1 + f)] = 0x3B + f;
                 _vkMap[VirtualKey.F11] = 0x57;
@@ -1208,6 +1209,7 @@ namespace XboxVmHost
             if (_vmDone) { EndVm(); return; }
             if (_stopAsked && (DateTime.UtcNow - _stopAskedAt).TotalSeconds > 15) { EndVm(); return; }
             if (_tablet) FlushAbs();
+            PollGamepad();
             if (_debugOn)
             {
                 try { VmDebug.Text = "mouse  raw:" + _dbgMouse + "  window:" + _dbgPtr + "  page:" + _dbgXaml + "  type:" + _dbgType + "  keys:" + _dbgKeysSent; } catch { }
@@ -1249,7 +1251,7 @@ namespace XboxVmHost
         private int KeyNumberOf(VirtualKey vkey, CorePhysicalKeyStatus st)
         {
             int vk = (int)vkey;
-            if (vk >= 195 && vk <= 218) return 0;   // controller buttons arrive as "keys"; ignore them
+            if (vk >= 195 && vk <= 218 && !_vkMap.ContainsKey(vkey)) return 0;   // controller buttons arrive as "keys"; ignore them
             uint sc = st.ScanCode;
             if (sc != 0 && sc < 0x80) return (int)sc | (st.IsExtendedKey ? 0x80 : 0);
             int n;
@@ -1274,7 +1276,7 @@ namespace XboxVmHost
                     return;
             }
             int vk = (int)e.VirtualKey;
-            if (vk >= 195 && vk <= 218) return;
+            if (vk >= 195 && vk <= 218 && !_vkMap.ContainsKey(e.VirtualKey) && e.VirtualKey != VirtualKey.GamepadY) return;
             CoreWindow w = Window.Current.CoreWindow;
             // Emergency stop from a real keyboard: Ctrl + Alt + Shift + Q
             if (down && e.VirtualKey == VirtualKey.Q && KeyDownNow(w, VirtualKey.Control) &&
@@ -1309,6 +1311,7 @@ namespace XboxVmHost
                 return;
             }
             e.Handled = true;
+            if (OskHandleKey(e, down)) return;
             int n = KeyNumberOf(e.VirtualKey, e.KeyStatus);
             _dbgKey = (down ? "down " : "up ") + e.VirtualKey + " scan=" + e.KeyStatus.ScanCode + " sent=" + n;
             if (down)
